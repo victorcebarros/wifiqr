@@ -127,7 +127,7 @@ def prompt(*, msg: str = None, opts: dict[str, bool] = None) -> bool:
     while (answer := input(msg).lower()) not in opts:
         pass
 
-    return opts[answer.lower()]
+    return opts[answer]
 
 
 def can_overwrite(outfile: str) -> bool:
@@ -139,61 +139,33 @@ def can_overwrite(outfile: str) -> bool:
     return True
 
 
-def gen_wifi_qr_image(code: qrcode.QRCode, outfile: str = None) -> bool:
-    """Generates Wi-Fi QR Code Image."""
-    img = code.make_image()
-
-    if outfile is None:
-        img.show()
-        return True
-
-    if not can_overwrite(outfile):
-        return False
-
-    try:
-        img.save(outfile)
-        return True
-    except (ValueError, OSError) as err:
-        print("error: Could not save file:", err, file=sys.stderr)
-        return False
-
-
-def gen_wifi_qr_text(code: qrcode.QRCode, outfile: str = None) -> bool:
-    """Generates Wi-Fi QR Code Text."""
-    buffer = io.StringIO()
-
-    code.print_ascii(out=buffer, invert=True)
-
-    qrstring = buffer.getvalue()
-
-    buffer.close()
-
-    if outfile is None:
-        print(qrstring, end="")
-        return True
-
-    if not can_overwrite(outfile):
-        return False
-
-    try:
-        with open(outfile, "w", encoding="utf-8") as out:
-            out.write(qrstring)
-        return True
-    except OSError as err:
-        print("error: Could not save file:", err, file=sys.stderr)
-        return False
-
-
 def gen_wifi_qr(wifi_str: str, outfile: str = None,
-                is_terminal: bool = False) -> bool:
-    """Wraps gen_wifi_qr_* functions."""
+                is_terminal: bool = False) -> None:
+    """Generates Wi-Fi QR, and outputs to the screen or to a file."""
     code = qrcode.QRCode()
     code.add_data(wifi_str)
 
     if is_terminal:
-        return gen_wifi_qr_text(code, outfile)
+        buffer = io.StringIO()
+        code.print_ascii(out=buffer, invert=True)
+        qrstring = buffer.getvalue()
+        buffer.close()
 
-    return gen_wifi_qr_image(code, outfile)
+        if outfile is None:
+            print(qrstring, end="")
+            return
+
+        with open(outfile, "w", encoding="utf-8") as out:
+            out.write(qrstring)
+            return
+
+    img = code.make_image()
+
+    if outfile is None:
+        img.show()
+        return
+
+    img.save(outfile)
 
 
 def main(argv: list) -> int:
@@ -212,18 +184,23 @@ def main(argv: list) -> int:
 
     print("Created", wifi_str)
 
-    # NOTE: I may later add warnings in case the user didn't add
-    # some required information to successfully create a valid
-    # QR Code. For example, if they are using WPA2, but they forgot
-    # to add a key, it would create a QR Code without a Password, which
-    # is probably not what the user intended to do.
+    auth = {"WEP", "WPA", "WPA2", "WPA2-EAP"}
+    if not options.key and options.auth.upper() in auth:
+        print("warning: Wi-Fi connection is missing a password!",
+              file=sys.stderr)
 
-    success = gen_wifi_qr(wifi_str, options.output, options.terminal)
+    if options.output and not can_overwrite(options.output):
+        print("error: User refused to overwrite:",
+              options.output, file=sys.stderr)
+        return EXIT_FAILURE
 
-    if success:
-        print("Success.")
+    try:
+        gen_wifi_qr(wifi_str, options.output, options.terminal)
+    except (ValueError, OSError) as err:
+        print("error: Could not save file:", err, file=sys.stderr)
+        return EXIT_FAILURE
 
-    return EXIT_SUCCESS if success else EXIT_FAILURE
+    return EXIT_SUCCESS
 
 
 if __name__ == "__main__":
